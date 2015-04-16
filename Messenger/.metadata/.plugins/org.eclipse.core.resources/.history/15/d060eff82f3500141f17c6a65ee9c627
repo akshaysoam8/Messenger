@@ -1,0 +1,254 @@
+package com.akshay.messenger;
+
+import java.net.UnknownHostException;
+
+import android.util.Log;
+
+import com.mongodb.BasicDBObject;
+import com.mongodb.DB;
+import com.mongodb.DBCollection;
+import com.mongodb.DBCursor;
+import com.mongodb.MongoClient;
+import com.mongodb.MongoClientURI;
+
+public class MongoDatabase
+{
+	public static MongoClientURI uri = null;
+	public static MongoClient client = null;
+	public static DB db;
+	public static final String COL_NAME = "name";
+	public static final String COL_EMAIL = "email";
+	public static final String COL_COUNT = "count";
+
+	public MongoDatabase() throws UnknownHostException
+	{
+		Log.i(Common.TAG, "MongoDatabase Constructor Called");
+	}
+
+	public static String AddNewProfile(final String Name, final String Email, final String regid)
+	{
+		Log.i(Common.TAG, "MongoDatabase Inside AddNewProfile");
+
+		uri = new MongoClientURI("mongodb://akshaysoam8:Akshay24@ds035250.mongolab.com:35250/akshay");
+
+		new Thread()
+		{
+			public void run()
+			{
+				try
+				{
+					client = new MongoClient(uri);
+				}
+				catch (UnknownHostException e)
+				{
+					Log.i(Common.TAG, "MongoDatabase UnknownHostException occurred.");
+
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+
+				db = client.getDB(Constants.DATABASE_NAME);
+
+				DBCollection profile = db.getCollection("profile");
+
+				BasicDBObject new_profile_object = new BasicDBObject();
+				new_profile_object.append("name", Name);
+				new_profile_object.append("email", Email);
+				new_profile_object.append("regid", regid);
+
+				BasicDBObject new_profile_array[] =
+				{ new_profile_object };
+
+				profile.insert(new_profile_array);
+
+				BasicDBObject query = new BasicDBObject();
+				query.append("name", Name);
+
+				DBCursor cursor = profile.find(query);
+
+				Common.PROFILE_ID = cursor.next().get("_id").toString();
+				
+				Log.i(Common.TAG, "MongoDatabase Common.PROFILE_ID : " + Common.PROFILE_ID);
+			}
+		}.start();
+
+		return Common.PROFILE_ID;
+	}
+
+	public static void DeleteProfile(final String id)
+	{
+		uri = new MongoClientURI(Constants.SERVER_URL);
+
+		new Thread()
+		{
+			public void run()
+			{
+				try
+				{
+					client = new MongoClient(uri);
+				}
+				catch (UnknownHostException e)
+				{
+					Log.i(Common.TAG, "MongoDatabase UnknownHostException occurred.");
+
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+
+				db = client.getDB(Constants.DATABASE_NAME);
+
+				DBCollection collection = db.getCollection("profile");
+
+				BasicDBObject query = new BasicDBObject();
+				query.append("_id", id);
+
+				collection.findAndRemove(query);
+			}
+		}.start();
+	}
+
+	public static void AddNewChat(final String from, final String to)
+	{
+		uri = new MongoClientURI(Constants.SERVER_URL);
+
+		new Thread()
+		{
+			public void run()
+			{
+				try
+				{
+					client = new MongoClient(uri);
+				}
+				catch (UnknownHostException e)
+				{
+					Log.i(Common.TAG, "MongoDatabase UnknownHostException occurred.");
+
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+
+				db = client.getDB(Constants.DATABASE_NAME);
+
+				String new_chat_name = from + "_to_" + to;
+
+				if (db.collectionExists(new_chat_name))
+				{
+					Log.i(Common.TAG, "MongoDatabase Collection Already Exists");
+				}
+				else
+				{
+					BasicDBObject params = new BasicDBObject();
+					params.append("autoIndexId", "true");
+
+					db.createCollection(new_chat_name, params);
+				}
+
+				if (!db.collectionExists(from))
+				{
+					BasicDBObject new_message_count = new BasicDBObject();
+					new_message_count.append("to", to);
+					new_message_count.append("new_message", "1");
+
+					BasicDBObject new_message_count_array[] =
+					{ new_message_count };
+
+					BasicDBObject params = new BasicDBObject();
+					params.append("autoIndexId", "true");
+
+					DBCollection message_count = db.createCollection(from, params);
+
+					message_count.insert(new_message_count_array);
+				}
+				else
+				{
+					DBCollection collection = db.getCollection(from);
+
+					BasicDBObject query = new BasicDBObject();
+					query.append("to", to);
+
+					collection.findAndRemove(query);
+
+					BasicDBObject new_message_count = new BasicDBObject();
+					new_message_count.append("to", to);
+					new_message_count.append("new_message", "1");
+
+					BasicDBObject new_message_count_array[] =
+					{ new_message_count };
+
+					collection.insert(new_message_count_array);
+				}
+			}
+		}.start();
+	}
+
+	public static void DeleteNewChat(final String from, final String to)
+	{
+		uri = new MongoClientURI(Constants.SERVER_URL);
+
+		new Thread()
+		{
+			public void run()
+			{
+				try
+				{
+					client = new MongoClient(uri);
+				}
+				catch (UnknownHostException e)
+				{
+					Log.i(Common.TAG, "MongoDatabase UnknownHostException occurred.");
+
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+
+				db = client.getDB(Constants.DATABASE_NAME);
+
+				String delete_chat_name = from + "_to_" + to;
+
+				if (db.collectionExists(delete_chat_name))
+				{
+					DBCollection collection = db.getCollection(delete_chat_name);
+					collection.drop();
+				}
+				else
+				{
+					Log.i(Common.TAG, "MongoDatabase Chat Name doesn't exist.");
+				}
+			}
+		}.start();
+	}
+
+	public static void SendNewMessage(final DBCollection new_chat, final String message_text, final String time)
+	{
+		uri = new MongoClientURI(Constants.SERVER_URL);
+
+		new Thread()
+		{
+			public void run()
+			{
+				try
+				{
+					client = new MongoClient(uri);
+				}
+				catch (UnknownHostException e)
+				{
+					Log.i(Common.TAG, "MongoDatabase UnknownHostException occurred.");
+
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+
+				db = client.getDB(Constants.DATABASE_NAME);
+
+				BasicDBObject new_message_object = new BasicDBObject();
+				new_message_object.append("text", message_text);
+				new_message_object.append("time", time);
+
+				BasicDBObject new_message_array[] =
+				{ new_message_object };
+
+				new_chat.insert(new_message_array);
+			}
+		}.start();
+	}
+}

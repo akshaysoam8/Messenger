@@ -1,0 +1,649 @@
+package com.akshay.messenger;
+
+import java.io.BufferedReader;
+import java.io.Closeable;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Random;
+
+import org.apache.http.HttpResponse;
+import org.apache.http.HttpStatus;
+import org.apache.http.NameValuePair;
+import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.message.BasicNameValuePair;
+
+import android.util.Log;
+
+import com.akshay.messenger.Result.Builder;
+import com.google.android.gcm.server.InvalidRequestException;
+
+public class Sender
+{
+	protected static final String UTF8 = "UTF-8";
+
+	/**
+	 * Initial delay before first retry, without jitter.
+	 */
+	protected static final int BACKOFF_INITIAL_DELAY = 1000;
+	/**
+	 * Maximum delay before a retry.
+	 */
+	protected static final int MAX_BACKOFF_DELAY = 1024000;
+
+	protected final Random random = new Random();
+
+	private final String key;
+
+	/**
+	 * Default constructor.
+	 * 
+	 * @Common.PARAM key API key obtained through the Google API Console.
+	 */
+
+	public Sender(String key)
+	{
+		this.key = nonNull(key);
+
+		Log.i(Common.TAG, "Sender Class API Key Recieved : " + key);
+	}
+
+	/**
+	 * Sends a message without retrying in case of service unavailability. See
+	 * {@link #send(Message, String, int)} for more info.
+	 * 
+	 * @return result of the post, or {@literal null} if the GCM service was
+	 *         unavailable or any network exception caused the request to fail.
+	 * 
+	 * @throws InvalidRequestException
+	 *             if GCM didn't returned a 200 or 5xx status.
+	 * @throws IllegalArgumentException
+	 *             if registrationId is {@literal null}.
+	 */
+
+	public Result sendNoRetry(Message message) throws IOException
+	{
+		Log.i(Common.TAG, "Sender Class sendNoRetry function called.");
+
+		Log.i(Common.TAG, "Sender Class Constants.RECIEVER_REG_ID : " + Constants.RECIEVER_REG_ID);
+
+		StringBuilder body = newBody(Common.PARAM_REGISTRATION_ID, Constants.RECIEVER_REG_ID);
+		Boolean delayWhileIdle = message.isDelayWhileIdle();
+
+		if (delayWhileIdle != null)
+		{
+			Log.i(Common.TAG, "Sender Class delayWhileIdle bit is not null passing to body.");
+
+			addParameter(body, Common.PARAM_DELAY_WHILE_IDLE, delayWhileIdle ? "1" : "0");
+		}
+
+		Boolean dryRun = message.isDryRun();
+
+		if (dryRun != null)
+		{
+			Log.i(Common.TAG, "Sender Class dryRun bit not null passing to body as argument.");
+
+			addParameter(body, Common.PARAM_DRY_RUN, dryRun ? "1" : "0");
+		}
+
+		String collapseKey = message.getCollapseKey();
+
+		if (collapseKey != null)
+		{
+			Log.i(Common.TAG, "Sender Class collapseKey bit not null passing to body.");
+
+			addParameter(body, Common.PARAM_COLLAPSE_KEY, collapseKey);
+		}
+
+		String restrictedPackageName = message.getRestrictedPackageName();
+
+		if (restrictedPackageName != null)
+		{
+			Log.i(Common.TAG, "Sender Class restrictedPackagedName bit not null passing to body.");
+
+			addParameter(body, Common.PARAM_RESTRICTED_PACKAGE_NAME, restrictedPackageName);
+		}
+
+		Integer timeToLive = message.getTimeToLive();
+
+		if (timeToLive != null)
+		{
+			Log.i(Common.TAG, "Sender Class timeToLive bit not null passing to body.");
+
+			addParameter(body, Common.PARAM_TIME_TO_LIVE, Integer.toString(timeToLive));
+		}
+
+		for (Entry<String, String> entry : message.getData().entrySet())
+		{
+			String key = entry.getKey();
+			String value = entry.getValue();
+
+			Log.i(Common.TAG, "Sender Class Checking the entry class values.");
+
+			if (key == null || value == null)
+			{
+				Log.i(Common.TAG, "Sender Class Key value found to be null.");
+
+			}
+			else
+			{
+				Log.i(Common.TAG, "Sender Class Key value not null passing as argument in Common.PARAM_PAYLOAD_PREFIX.");
+
+				key = Common.PARAM_PAYLOAD_PREFIX + key;
+				addParameter(body, key, URLEncoder.encode(value, UTF8));
+			}
+		}
+
+		String requestBody = body.toString();
+
+		Log.i(Common.TAG, "Sender HTTP requestBody : " + requestBody.toString());
+
+		HttpURLConnection conn;
+		int status = -1;
+
+		try
+		{
+			Log.i(Common.TAG, "Sender Class Making the Http Post request.");
+
+			conn = post(Common.GCM_SEND_ENDPOINT, requestBody);
+
+			Log.i(Common.TAG, "conn.getInputStream() : " + conn.getInputStream().toString());
+
+			status = conn.getResponseCode();
+
+			Log.i(Common.TAG, "Sender Class Status code : " + status);
+		}
+		catch (IOException e)
+		{
+			Log.i(Common.TAG, "Sender Class IOException occurred while making a Http Post request." + e);
+
+			Log.i(Common.TAG, "Sender Class Http post request status code : " + status);
+
+			return null;
+		}
+
+		Log.i(Common.TAG, "Sender Class Post request completed.");
+
+		Log.i(Common.TAG, "Sender Class Http post request status code : " + status);
+
+		if (status / 100 == 5)
+		{
+			Log.i(Common.TAG, "Sender Class GCM Service not available.");
+
+			return null;
+		}
+
+		String responseBody;
+
+		if (status != 200)
+		{
+			Log.i(Common.TAG, "Sender Class status code not equal to 200");
+
+			try
+			{
+				responseBody = getAndClose(conn.getErrorStream());
+
+				Log.i(Common.TAG, "Sender Class Plain post error response: " + responseBody);
+			}
+			catch (IOException e)
+			{
+				Log.i(Common.TAG, "Sender Class IOException reading response: " + e);
+
+				// ignore the exception since it will thrown an
+				// InvalidRequestException
+				// anyways
+				responseBody = "N/A";
+			}
+			throw new InvalidRequestException(status, responseBody);
+		}
+		else
+		{
+			Log.i(Common.TAG, "Sender Class Successfull message status return code.");
+
+			try
+			{
+				responseBody = getAndClose(conn.getInputStream());
+
+				Log.i(Common.TAG, "Sender Class responseBody : " + responseBody);
+			}
+			catch (IOException e)
+			{
+				Log.i(Common.TAG, "Sender Class IO Exception at getAndClose(conn.getInputStream())");
+
+				// return null so it can retry
+				return null;
+			}
+		}
+
+		String[] lines = responseBody.split("\n");
+
+		Log.i(Common.TAG, "lines.length : " + lines.length);
+
+		if (lines.length == 0 || lines[0].equals(""))
+		{
+			Log.i(Common.TAG, "Sender Class Recieved an empty response from GCM Service.");
+
+			throw new IOException("Received empty response from GCM service.");
+		}
+
+		String firstLine = lines[0];
+		String[] responseParts = split(firstLine);
+		String token = responseParts[0];
+		String value = responseParts[1];
+
+		if (token.equals(Common.TOKEN_MESSAGE_ID))
+		{
+			Log.i(Common.TAG, "Sender Class TOKEN_MESSAGE_ID match found.");
+			Log.i(Common.TAG, "Sender Class Checking for messageId = " + value + " in Result Class.");
+
+			Builder builder = new Result.Builder().messageId(value);
+			// check for canonical registration id
+
+			if (lines.length > 1)
+			{
+				Log.i(Common.TAG, "Sender Class lines length greater than 1.");
+
+				String secondLine = lines[1];
+				responseParts = split(secondLine);
+				token = responseParts[0];
+				value = responseParts[1];
+
+				if (token.equals(Common.TOKEN_CANONICAL_REG_ID))
+				{
+					Log.i(Common.TAG, "Sender Class token matches with TOKEN_CANONICAL_REG_ID");
+
+					builder.canonicalRegistrationId(value);
+				}
+				else
+				{
+					Log.i(Common.TAG, "Sender Class Invalid response from GCM " + responseBody);
+				}
+			}
+
+			Result result = builder.build();
+
+			Log.i(Common.TAG, "Sender Class result = " + result);
+
+			Log.i(Common.TAG, "Sender Class Message created successfully.");
+
+			return result;
+		}
+		else if (token.equals(Common.TOKEN_ERROR))
+		{
+			Log.i(Common.TAG, "Sender Class token matches with TOKEN_ERROR");
+
+			return new Result.Builder().errorCode(value).build();
+		}
+		else
+		{
+			Log.i(Common.TAG, "Sender Class Invalid response from GCM: " + responseBody);
+
+			throw new IOException("Invalid response from GCM: " + responseBody);
+		}
+	}
+
+	private IOException newIoException(String responseBody, Exception e)
+	{
+		// log exception, as IOException constructor that takes a message and
+		// cause
+		// is only available on Java 6
+		String msg = "Error parsing JSON response (" + responseBody + ")";
+
+		Log.i(Common.TAG, "Sender Class Error parsing JSON response (" + responseBody + ")");
+
+		return new IOException(msg + ":" + e);
+	}
+
+	private static void close(Closeable closeable)
+	{
+		if (closeable != null)
+		{
+			try
+			{
+				closeable.close();
+			}
+			catch (IOException e)
+			{
+				// ignore error
+
+			}
+		}
+	}
+
+	/**
+	 * Sets a JSON field, but only if the value is not {@literal null}.
+	 */
+	private void setJsonField(Map<Object, Object> json, String field, Object value)
+	{
+		if (value != null)
+		{
+			json.put(field, value);
+		}
+	}
+
+	private Number getNumber(Map<?, ?> json, String field)
+	{
+		Object value = json.get(field);
+		if (value == null)
+		{
+			throw new CustomParserException("Missing field: " + field);
+		}
+		if (!(value instanceof Number))
+		{
+			throw new CustomParserException("Field " + field + " does not contain a number: " + value);
+		}
+		return (Number) value;
+	}
+
+	class CustomParserException extends RuntimeException
+	{
+		CustomParserException(String message)
+		{
+			super(message);
+		}
+	}
+
+	private String[] split(String line) throws IOException
+	{
+		String[] split = line.split("=", 2);
+		if (split.length != 2)
+		{
+			throw new IOException("Received invalid response line from GCM: " + line);
+		}
+		return split;
+	}
+
+	/**
+	 * Make an HTTP post to a given URL.
+	 * 
+	 * @return HTTP response.
+	 */
+	protected HttpURLConnection post(String url, String body) throws IOException
+	{
+		Log.i(Common.TAG, "Sender Class making a HTTP Post request to a given URL.");
+
+		return post(url, "application/x-www-form-urlencoded;charset=UTF-8", body);
+	}
+
+	/**
+	 * Makes an HTTP POST request to a given endpoint.
+	 * 
+	 * <p>
+	 * <strong>Note: </strong> the returned connected should not be
+	 * disconnected, otherwise it would kill persistent connections made using
+	 * Keep-Alive.
+	 * 
+	 * @param url
+	 *            endpoint to post the request.
+	 * @param contentType
+	 *            type of request.
+	 * @param body
+	 *            body of the request.
+	 * 
+	 * @return the underlying connection.
+	 * 
+	 * @throws IOException
+	 *             propagated from underlying methods.
+	 */
+	protected HttpURLConnection post(String url, String contentType, String body) throws IOException
+	{
+		Log.i(Common.TAG, "Sender Class Making a HTTP Post request to a given url using a content .");
+
+		if (url == null || body == null)
+		{
+			Log.i(Common.TAG, "Sender Class URL is null or body is null.");
+
+			throw new IllegalArgumentException("arguments cannot be null");
+		}
+
+		if (!url.startsWith("https://"))
+		{
+			Log.i(Common.TAG, "Sender Class URL does not use https: " + url);
+
+		}
+
+		Log.i(Common.TAG, "Sender Class Sending POST to " + url);
+		Log.i(Common.TAG, "Sender Class POST body: " + body);
+
+		byte[] bytes = body.getBytes();
+		HttpURLConnection conn = getConnection(url);
+
+		conn.setDoOutput(true);
+		conn.setUseCaches(false);
+		conn.setFixedLengthStreamingMode(bytes.length);
+		conn.setRequestMethod("POST");
+		conn.setRequestProperty("Content-Type", contentType);
+		conn.setRequestProperty("Authorization", "key=" + key);
+
+		OutputStream out = conn.getOutputStream();
+
+		try
+		{
+			out.write(bytes);
+
+			Log.i(Common.TAG, "Sender Class bytes : " + new String(bytes));
+		}
+		finally
+		{
+			close(out);
+		}
+
+		Log.i(Common.TAG, "Sender Class HTTP Post object : " + conn);
+		Log.i(Common.TAG, "Sender Class HTTP Post Object OutStream Object " + out.toString());
+
+		return conn;
+	}
+
+	/**
+	 * Creates a map with just one key-value pair.
+	 */
+	protected static final Map<String, String> newKeyValues(String key, String value)
+	{
+		Map<String, String> keyValues = new HashMap<String, String>(1);
+		keyValues.put(nonNull(key), nonNull(value));
+		return keyValues;
+	}
+
+	/**
+	 * Creates a {@link StringBuilder} to be used as the body of an HTTP POST.
+	 * 
+	 * @param name
+	 *            initial parameter for the POST.
+	 * @param value
+	 *            initial value for that parameter.
+	 * @return StringBuilder to be used an HTTP POST body.
+	 */
+	protected static StringBuilder newBody(String name, String value)
+	{
+		return new StringBuilder(nonNull(name)).append('=').append(nonNull(value));
+	}
+
+	/**
+	 * Adds a new parameter to the HTTP POST body.
+	 * 
+	 * @param body
+	 *            HTTP POST body.
+	 * @param name
+	 *            parameter's name.
+	 * @param value
+	 *            parameter's value.
+	 */
+	protected static void addParameter(StringBuilder body, String name, String value)
+	{
+		nonNull(body).append('&').append(nonNull(name)).append('=').append(nonNull(value));
+	}
+
+	/**
+	 * Gets an {@link HttpURLConnection} given an URL.
+	 */
+	protected HttpURLConnection getConnection(String url) throws IOException
+	{
+		HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+		return conn;
+	}
+
+	/**
+	 * Convenience method to convert an InputStream to a String.
+	 * <p>
+	 * If the stream ends in a newline character, it will be stripped.
+	 * <p>
+	 * If the stream is {@literal null}, returns an empty string.
+	 */
+	protected static String getString(InputStream stream) throws IOException
+	{
+		Log.i(Common.TAG, "Sender Class inside getString function.");
+
+		if (stream == null)
+		{
+			return "";
+		}
+
+		BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
+		StringBuilder content = new StringBuilder();
+		String newLine;
+
+		do
+		{
+			newLine = reader.readLine();
+
+			if (newLine != null)
+			{
+				content.append(newLine).append('\n');
+			}
+		}
+		while (newLine != null);
+
+		if (content.length() > 0)
+		{
+			// strip last newline
+			content.setLength(content.length() - 1);
+		}
+
+		return content.toString();
+	}
+
+	private static String getAndClose(InputStream stream) throws IOException
+	{
+		Log.i(Common.TAG, "Sender Class inside getAndClose function.");
+
+		try
+		{
+			Log.i(Common.TAG, "Sender class getAndClose stream " + stream);
+
+			return getString(stream);
+		}
+		finally
+		{
+			if (stream != null)
+			{
+				close(stream);
+			}
+		}
+	}
+
+	static <T> T nonNull(T argument)
+	{
+		if (argument == null)
+		{
+			throw new IllegalArgumentException("argument cannot be null");
+		}
+		return argument;
+	}
+
+	void sleep(long millis)
+	{
+		try
+		{
+			Thread.sleep(millis);
+		}
+		catch (InterruptedException e)
+		{
+			Thread.currentThread().interrupt();
+		}
+	}
+
+	public void sendMessage(String message, String to, String time)
+	{
+		String contentType = "application/x-www-form-urlencoded;charset=UTF-8";
+
+		HttpClient client = new DefaultHttpClient();
+		HttpPost post = new HttpPost(Common.GCM_SEND_ENDPOINT);
+		post.setHeader("Content-Type", contentType);
+		post.setHeader("Authorization", "key=" + key);
+
+		try
+		{
+			List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>(1);
+
+			nameValuePairs.add(new BasicNameValuePair("registration_id", Constants.RECIEVER_REG_ID));
+			nameValuePairs.add(new BasicNameValuePair("collapse_key", "Akshay"));
+			nameValuePairs.add(new BasicNameValuePair("delay_while_idle", "true"));
+			nameValuePairs.add(new BasicNameValuePair("time_to_live", "108"));
+			nameValuePairs.add(new BasicNameValuePair("data.message", message));
+			nameValuePairs.add(new BasicNameValuePair("data.to", to));
+			nameValuePairs.add(new BasicNameValuePair("data.time", time));
+
+			post.setEntity(new UrlEncodedFormEntity(nameValuePairs));
+			
+			Log.i(Common.TAG, "nameValuePairs : " + nameValuePairs.toString());
+
+			HttpResponse response = client.execute(post);
+
+			InputStream ips = response.getEntity().getContent();
+			BufferedReader buf = new BufferedReader(new InputStreamReader(ips, "UTF-8"));
+
+			if (response.getStatusLine().getStatusCode() != HttpStatus.SC_OK)
+			{
+				throw new Exception(response.getStatusLine().getReasonPhrase());
+			}
+
+			StringBuilder sb = new StringBuilder();
+			String s;
+
+			while (true)
+			{
+				s = buf.readLine();
+				if (s == null || s.length() == 0)
+					break;
+				sb.append(s);
+
+			}
+
+			buf.close();
+			ips.close();
+		}
+		catch (ClientProtocolException e)
+		{
+			// TODO Auto-generated catch block
+			
+			Log.i(Common.TAG, "sender Class ClientProtocolException " + e);
+			e.printStackTrace();
+		}
+		catch (IOException e)
+		{
+			// TODO Auto-generated catch block
+			Log.i(Common.TAG, "sender Class IOException " + e);
+			e.printStackTrace();
+		}
+		catch (Exception e)
+		{
+			// TODO Auto-generated catch block
+			Log.i(Common.TAG, "sender Class Exception " + e);
+			e.printStackTrace();
+		}
+
+	}
+}

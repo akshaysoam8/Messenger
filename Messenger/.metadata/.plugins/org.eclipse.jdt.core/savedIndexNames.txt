@@ -1,0 +1,13 @@
+INDEX VERSION 1.126 OT2+F:\My Programs\Messenger\.metadata\.plugins\org.eclipse.jdt.core
+143167094.index
+1410890353.index
+1889772380.index
+3938445083.index
+3329285052.index
+1618635831.index
+938726717.index
+848856923.index
+90715245.index
+1976639254.index
+2872844829.index
+3619624358.index

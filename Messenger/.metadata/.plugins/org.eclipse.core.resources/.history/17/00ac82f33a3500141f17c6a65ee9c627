@@ -1,0 +1,226 @@
+package com.akshay.messenger;
+
+import java.net.UnknownHostException;
+
+import android.util.Log;
+
+import com.mongodb.BasicDBObject;
+import com.mongodb.DB;
+import com.mongodb.DBCollection;
+import com.mongodb.DBCursor;
+import com.mongodb.MongoClient;
+import com.mongodb.MongoClientURI;
+
+public class MongoDatabase
+{
+	public static MongoClientURI uri = null;
+	public static MongoClient client = null;
+	public static DB db;
+	public static final String COL_NAME = "name";
+	public static final String COL_EMAIL = "email";
+	public static final String COL_COUNT = "count";
+
+	public MongoDatabase() throws UnknownHostException
+	{
+		Log.i(Common.TAG, "MongoDatabase Constructor Called");
+	}
+
+	public static String AddNewProfile(final String Name, final String Email, final String regid)
+	{
+		Log.i(Common.TAG, "MongoDatabase Inside AddNewProfile");
+
+		uri = new MongoClientURI("mongodb://akshaysoam8:Akshay24@ds035250.mongolab.com:35250/akshay");
+
+		new Thread()
+		{
+			public void run()
+			{
+				try
+				{
+					client = new MongoClient(uri);
+				}
+				catch (UnknownHostException e)
+				{
+					Log.i(Common.TAG, "MongoDatabase UnknownHostException occurred.");
+
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+
+				db = client.getDB(Constants.DATABASE_NAME);
+
+				DBCollection profile = db.getCollection("profile");
+
+				BasicDBObject new_profile_object = new BasicDBObject();
+				new_profile_object.append("name", Name);
+				new_profile_object.append("email", Email);
+				new_profile_object.append("regid", regid);
+
+				BasicDBObject new_profile_array[] =
+				{ new_profile_object };
+
+				profile.insert(new_profile_array);
+
+				BasicDBObject query = new BasicDBObject();
+				query.append("name", Name);
+
+				DBCursor cursor = profile.find(query);
+
+				Common.PROFILE_ID = cursor.next().get("_id").toString();
+
+				Log.i(Common.TAG, "MongoDatabase Common.PROFILE_ID : " + Common.PROFILE_ID);
+			}
+		}.start();
+
+		return Common.PROFILE_ID;
+	}
+
+	public static void getRegistrationIdFromEmailId(final String email_id)
+	{
+		uri = new MongoClientURI(Constants.SERVER_URL);
+
+		new Thread()
+		{
+			public void run()
+			{
+				try
+				{
+					client = new MongoClient(uri);
+				}
+				catch (UnknownHostException e)
+				{
+					Log.i(Common.TAG, "MongoDatabase UnknownHostException occurred.");
+
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+
+				db = client.getDB(Constants.DATABASE_NAME);
+
+				DBCollection profile = db.getCollection("profile");
+
+				BasicDBObject query = new BasicDBObject();
+				query.append("email", email_id);
+
+				DBCursor cursor = profile.find(query);
+
+				Common.PARAM_RECIEVER_REGISTRATION_ID = cursor.next().get("regid").toString();
+			}
+		}.start();
+	}
+
+	public static void getProfileIdFromEmailId(final String email_id)
+	{
+		uri = new MongoClientURI(Constants.SERVER_URL);
+
+		new Thread()
+		{
+			public void run()
+			{
+				try
+				{
+					client = new MongoClient(uri);
+				}
+				catch (UnknownHostException e)
+				{
+					Log.i(Common.TAG, "MongoDatabase UnknownHostException occurred.");
+
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+
+				db = client.getDB(Constants.DATABASE_NAME);
+
+				DBCollection profile = db.getCollection("profile");
+
+				BasicDBObject query = new BasicDBObject();
+				query.append("email", email_id);
+
+				DBCursor cursor = profile.find(query);
+
+				Common.PROFILE_ID = cursor.next().get("_id").toString();
+			}
+		}.start();
+	}
+
+	public static void getProfileIdFromRegistrationId()
+	{
+		uri = new MongoClientURI(Constants.SERVER_URL);
+
+		new Thread()
+		{
+			public void run()
+			{
+				try
+				{
+					client = new MongoClient(uri);
+				}
+				catch (UnknownHostException e)
+				{
+					Log.i(Common.TAG, "MongoDatabase UnknownHostException occurred.");
+
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+
+				db = client.getDB(Constants.DATABASE_NAME);
+
+				DBCollection profile = db.getCollection("profile");
+
+				BasicDBObject query = new BasicDBObject();
+				query.append("regid", Common.REG_ID);
+
+				DBCursor cursor = profile.find(query);
+
+				Common.PROFILE_ID = cursor.next().get("_id").toString();
+			}
+		}.start();
+	}
+
+	public static void sendNewMessage(String message, String send_to, String time)
+	{
+		// It already contains the profile id of reciever
+		final String to = Common.PROFILE_ID;
+
+		// getting the profile id from the stored registration id of the sender
+		getProfileIdFromRegistrationId();
+		final String from = Common.PROFILE_ID;
+
+		final String new_chat_name = from + "_to_" + to;
+
+		uri = new MongoClientURI(Constants.SERVER_URL);
+
+		new Thread()
+		{
+			public void run()
+			{
+				try
+				{
+					client = new MongoClient(uri);
+				}
+				catch (UnknownHostException e)
+				{
+					Log.i(Common.TAG, "MongoDatabase UnknownHostException occurred.");
+
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+
+				db = client.getDB(Constants.DATABASE_NAME);
+
+				if (!db.collectionExists(new_chat_name))
+				{
+					BasicDBObject params = new BasicDBObject();
+					params.append("autoIndexId", "true");
+
+					db.createCollection(new_chat_name, params);
+					
+					BasicDBObject message_array[] = { message_object };
+				}
+				else
+					
+			}
+		}.start();
+
+	}
+}

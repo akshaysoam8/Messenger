@@ -1,0 +1,338 @@
+package com.akshay.messenger;
+
+import java.io.BufferedReader;
+import java.io.Closeable;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Random;
+
+import org.apache.http.Header;
+import org.apache.http.HttpResponse;
+import org.apache.http.HttpStatus;
+import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import android.util.Log;
+
+public class Sender
+{
+	protected static final String UTF8 = "UTF-8";
+
+	/**
+	 * Initial delay before first retry, without jitter.
+	 */
+	protected static final int BACKOFF_INITIAL_DELAY = 1000;
+	/**
+	 * Maximum delay before a retry.
+	 */
+	protected static final int MAX_BACKOFF_DELAY = 1024000;
+
+	protected final Random random = new Random();
+
+	private final String key;
+
+	/**
+	 * Default constructor.
+	 * 
+	 * @Common.PARAM key API key obtained through the Google API Console.
+	 */
+
+	public Sender(String key)
+	{
+		this.key = nonNull(key);
+
+		Log.i(Common.TAG, "Sender Class API Key Recieved : " + key);
+	}
+	
+	private static void close(Closeable closeable)
+	{
+		if (closeable != null)
+		{
+			try
+			{
+				closeable.close();
+			}
+			catch (IOException e)
+			{
+				// ignore error
+
+			}
+		}
+	}
+
+	protected HttpURLConnection post(String url, String body) throws IOException
+	{
+		Log.i(Common.TAG, "Sender Class making a HTTP Post request to a given URL.");
+
+		return post(url, "application/x-www-form-urlencoded;charset=UTF-8", body);
+	}
+
+	protected HttpURLConnection post(String url, String contentType, String body) throws IOException
+	{
+		Log.i(Common.TAG, "Sender Class Making a HTTP Post request to a given url using a content .");
+
+		if (url == null || body == null)
+		{
+			Log.i(Common.TAG, "Sender Class URL is null or body is null.");
+
+			throw new IllegalArgumentException("arguments cannot be null");
+		}
+
+		if (!url.startsWith("https://"))
+		{
+			Log.i(Common.TAG, "Sender Class URL does not use https: " + url);
+
+		}
+
+		Log.i(Common.TAG, "Sender Class Sending POST to " + url);
+		Log.i(Common.TAG, "Sender Class POST body: " + body);
+
+		byte[] bytes = body.getBytes();
+		HttpURLConnection conn = getConnection(url);
+
+		conn.setDoOutput(true);
+		conn.setUseCaches(false);
+		conn.setFixedLengthStreamingMode(bytes.length);
+		conn.setRequestMethod("POST");
+		conn.setRequestProperty("Content-Type", contentType);
+		conn.setRequestProperty("Authorization", "key=" + key);
+
+		OutputStream out = conn.getOutputStream();
+
+		try
+		{
+			out.write(bytes);
+
+			Log.i(Common.TAG, "Sender Class bytes : " + new String(bytes));
+		}
+		finally
+		{
+			close(out);
+		}
+
+		Log.i(Common.TAG, "Sender Class HTTP Post object : " + conn);
+		Log.i(Common.TAG, "Sender Class HTTP Post Object OutStream Object " + out.toString());
+
+		return conn;
+	}
+
+	/**
+	 * Creates a map with just one key-value pair.
+	 */
+	protected static final Map<String, String> newKeyValues(String key, String value)
+	{
+		Map<String, String> keyValues = new HashMap<String, String>(1);
+		keyValues.put(nonNull(key), nonNull(value));
+		return keyValues;
+	}
+
+	/**
+	 * Creates a {@link StringBuilder} to be used as the body of an HTTP POST.
+	 * 
+	 * @param name
+	 *            initial parameter for the POST.
+	 * @param value
+	 *            initial value for that parameter.
+	 * @return StringBuilder to be used an HTTP POST body.
+	 */
+	protected static StringBuilder newBody(String name, String value)
+	{
+		return new StringBuilder(nonNull(name)).append('=').append(nonNull(value));
+	}
+
+	/**
+	 * Adds a new parameter to the HTTP POST body.
+	 * 
+	 * @param body
+	 *            HTTP POST body.
+	 * @param name
+	 *            parameter's name.
+	 * @param value
+	 *            parameter's value.
+	 */
+	protected static void addParameter(StringBuilder body, String name, String value)
+	{
+		nonNull(body).append('&').append(nonNull(name)).append('=').append(nonNull(value));
+	}
+
+	/**
+	 * Gets an {@link HttpURLConnection} given an URL.
+	 */
+	protected HttpURLConnection getConnection(String url) throws IOException
+	{
+		HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+		return conn;
+	}
+
+	/**
+	 * Convenience method to convert an InputStream to a String.
+	 * <p>
+	 * If the stream ends in a newline character, it will be stripped.
+	 * <p>
+	 * If the stream is {@literal null}, returns an empty string.
+	 */
+	protected static String getString(InputStream stream) throws IOException
+	{
+		Log.i(Common.TAG, "Sender Class inside getString function.");
+
+		if (stream == null)
+		{
+			return "";
+		}
+
+		BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
+		StringBuilder content = new StringBuilder();
+		String newLine;
+
+		do
+		{
+			newLine = reader.readLine();
+
+			if (newLine != null)
+			{
+				content.append(newLine).append('\n');
+			}
+		}
+		while (newLine != null);
+
+		if (content.length() > 0)
+		{
+			// strip last newline
+			content.setLength(content.length() - 1);
+		}
+
+		return content.toString();
+	}
+
+	static <T> T nonNull(T argument)
+	{
+		if (argument == null)
+		{
+			throw new IllegalArgumentException("argument cannot be null");
+		}
+		return argument;
+	}
+
+	void sleep(long millis)
+	{
+		try
+		{
+			Thread.sleep(millis);
+		}
+		catch (InterruptedException e)
+		{
+			Thread.currentThread().interrupt();
+		}
+	}
+
+	public void sendMessage2(String message, String to, String time)
+	{
+		String contentType = "application/json";
+		String API_KEY = "AIzaSyAEVNQZalm82bHtVSLWMeRdzmzn6aazMFw";
+
+		Log.i(Common.TAG, "Sender Class key : " + key);
+
+		String url = "https://android.googleapis.com/gcm/send";
+
+		HttpClient client = new DefaultHttpClient();
+		HttpPost post = new HttpPost(url);
+
+		post.setHeader("Authorization", "key=" + API_KEY);
+		post.setHeader("Content-Type", contentType);
+		
+		Header header[] = post.getAllHeaders();
+		
+		Log.i(Common.TAG, "Sender Class Header of the request : " + header.toString());
+
+		JSONObject mainData = new JSONObject();
+
+		try
+		{
+			mainData.putOpt("collapse_key", "Akshay");
+			mainData.putOpt("time_to_live", 108);
+			mainData.putOpt("delay_while_idle", true);
+
+			JSONObject data = new JSONObject();
+
+			data.putOpt("message", message);
+			data.putOpt("sender", Constants.SENDER_NAME);
+			data.putOpt("time", time);
+
+			JSONArray regIds = new JSONArray();
+
+			regIds.put(Constants.RECIEVER_REG_ID);
+
+			mainData.put("registration_ids", regIds);
+			mainData.put("data", data);
+
+			Log.i(Common.TAG, "Sender Class Json data : " + mainData.toString());
+			
+			StringEntity se = new StringEntity(mainData.toString());
+			post.setEntity(se);
+			
+			Log.i(Common.TAG, "Sender Class post object : " + post.toString());
+
+			HttpResponse response = client.execute(post);
+
+			InputStream ips = response.getEntity().getContent();
+			BufferedReader buf = new BufferedReader(new InputStreamReader(ips, "UTF-8"));
+
+			Log.i(Common.TAG, "Sender Class post request response " + response.getStatusLine().getStatusCode());
+			
+			StringBuilder sb = new StringBuilder();
+			String s;
+
+			while (true)
+			{
+				s = buf.readLine();
+
+				if (s == null || s.length() == 0)
+					break;
+				sb.append(s);
+
+			}
+
+			Log.i(Common.TAG, "sender Class http response " + sb.toString());
+
+			if (response.getStatusLine().getStatusCode() != HttpStatus.SC_OK)
+			{
+				throw new Exception(response.getStatusLine().getReasonPhrase());
+			}
+
+			buf.close();
+			ips.close();
+		}
+		catch (ClientProtocolException e)
+		{
+			// TODO Auto-generated catch block
+
+			Log.i(Common.TAG, "sender Class ClientProtocolException " + e);
+			e.printStackTrace();
+		}
+		catch (IOException e)
+		{
+			// TODO Auto-generated catch block
+			Log.i(Common.TAG, "sender Class IOException " + e);
+			e.printStackTrace();
+		}
+		catch (Exception e)
+		{
+			// TODO Auto-generated catch block
+			Log.i(Common.TAG, "sender Class Exception " + e);
+			e.printStackTrace();
+		}
+		
+		Log.i(Common.TAG, "Sender SendMessage2 ended.");
+	}
+}

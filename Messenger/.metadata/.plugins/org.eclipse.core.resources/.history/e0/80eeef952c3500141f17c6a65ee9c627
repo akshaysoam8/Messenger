@@ -1,0 +1,387 @@
+package com.akshay.messenger;
+
+import java.io.BufferedReader;
+import java.io.Closeable;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Random;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import org.json.simple.JSONObject;
+import org.json.simple.JSONValue;
+import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
+
+import android.util.Log;
+
+public class Sender
+{
+	protected static final String UTF8 = "UTF-8";
+
+	/**
+	 * Initial delay before first retry, without jitter.
+	 */
+	protected static final int BACKOFF_INITIAL_DELAY = 1000;
+	/**
+	 * Maximum delay before a retry.
+	 */
+	protected static final int MAX_BACKOFF_DELAY = 1024000;
+
+	protected final Random random = new Random();
+	
+	private final String key;
+
+	/**
+	 * Default constructor.
+	 * 
+	 * @param key
+	 *            API key obtained through the Google API Console.
+	 */
+
+	public Sender(String key)
+	{
+		this.key = nonNull(key);
+
+		Log.i(Common.TAG, "Sender Class API Key Recieved : " + key);
+	}
+	
+	/**
+	 * Sends a message to one device, retrying in case of unavailability.
+	 * 
+	 * <p>
+	 * <strong>Note: </strong> this method uses exponential back-off to retry in
+	 * case of service unavailability and hence could block the calling thread
+	 * for many seconds.
+	 * 
+	 * @param message
+	 *            message to be sent, including the device's registration id.
+	 * @param registrationId
+	 *            device where the message will be sent.
+	 * @param retries
+	 *            number of retries in case of service unavailability errors.
+	 * 
+	 * @return result of the request (see its javadoc for more details).
+	 * 
+	 * @throws IllegalArgumentException
+	 *             if registrationId is {@literal null}.
+	 * @throws InvalidRequestException
+	 *             if GCM didn't returned a 200 or 5xx status.
+	 * @throws IOException
+	 *             if message could not be sent.
+	 */
+
+	public Result send(Message message, String registrationId, int retries) throws IOException
+	{
+		int attempt = 0;
+		Result result = null;
+		int backoff = BACKOFF_INITIAL_DELAY;
+		boolean tryAgain;
+		do
+		{
+			attempt++;
+
+			if (logger.isLoggable(Level.FINE))
+			{
+				logger.fine("Attempt #" + attempt + " to send message " + message + " to regIds " + registrationId);
+			}
+
+			result = sendNoRetry(message, registrationId);
+			tryAgain = result == null && attempt <= retries;
+
+			if (tryAgain)
+			{
+				int sleepTime = backoff / 2 + random.nextInt(backoff);
+
+				sleep(sleepTime);
+
+				if (2 * backoff < MAX_BACKOFF_DELAY)
+				{
+					backoff *= 2;
+				}
+			}
+		}
+		while (tryAgain);
+
+		if (result == null)
+		{
+			throw new IOException("Could not send message after " + attempt + " attempts");
+		}
+
+		return result;
+	}
+
+	/**
+	 * Sends a message without retrying in case of service unavailability. See
+	 * {@link #send(Message, String, int)} for more info.
+	 * 
+	 * @return result of the post, or {@literal null} if the GCM service was
+	 *         unavailable or any network exception caused the request to fail.
+	 * 
+	 * @throws InvalidRequestException
+	 *             if GCM didn't returned a 200 or 5xx status.
+	 * @throws IllegalArgumentException
+	 *             if registrationId is {@literal null}.
+	 */
+
+	public Result sendNoRetry(Message message, String registrationId) throws IOException
+	{
+		Log.i(Common.TAG, "Sender Class sendNoRetry function called.");
+		Log.i(Common.TAG, "Sender Class Message message : " + message.toString());
+		Log.i(Common.TAG, "Sender Class String registrationId : " + registrationId);
+
+		StringBuilder body = newBody(PARAM_REGISTRATION_ID, registrationId);
+		Boolean delayWhileIdle = message.isDelayWhileIdle();
+
+		if (delayWhileIdle != null)
+		{
+			Log.i(Common.TAG, "Sender Class delayWhileIdle bit is not null passing to body.");
+
+			addParameter(body, PARAM_DELAY_WHILE_IDLE, delayWhileIdle ? "1" : "0");
+		}
+
+		Boolean dryRun = message.isDryRun();
+
+		if (dryRun != null)
+		{
+			Log.i(Common.TAG, "Sender Class dryRun bit not null passing to body as argument.");
+
+			addParameter(body, PARAM_DRY_RUN, dryRun ? "1" : "0");
+		}
+
+		String collapseKey = message.getCollapseKey();
+
+		if (collapseKey != null)
+		{
+			Log.i(Common.TAG, "Sender Class collapseKey bit not null passing to body.");
+
+			addParameter(body, PARAM_COLLAPSE_KEY, collapseKey);
+		}
+
+		String sender_name = message.getSenderName();
+
+		if (sender_name != null)
+		{
+			Log.i(Common.TAG, "Sender Class sender_name is not null passing to body.");
+
+			addParameter(body, PARAM_SENDER_NAME, sender_name);
+		}
+
+		String message_body = message.getMessageBody();
+
+		if (message_body != null)
+		{
+			Log.i(Common.TAG, "Sender Class message_body is not null passing to body.");
+
+			addParameter(body, PARAM_MESSAGE_BODY, message_body);
+		}
+
+		String restrictedPackageName = message.getRestrictedPackageName();
+
+		if (restrictedPackageName != null)
+		{
+			Log.i(Common.TAG, "Sender Class restrictedPackagedName bit not null passing to body.");
+
+			addParameter(body, PARAM_RESTRICTED_PACKAGE_NAME, restrictedPackageName);
+		}
+
+		Integer timeToLive = message.getTimeToLive();
+
+		if (timeToLive != null)
+		{
+			Log.i(Common.TAG, "Sender Class timeToLive bit not null passing to body.");
+
+			addParameter(body, PARAM_TIME_TO_LIVE, Integer.toString(timeToLive));
+		}
+
+		for (Entry<String, String> entry : message.getData().entrySet())
+		{
+			String key = entry.getKey();
+			String value = entry.getValue();
+
+			Log.i(Common.TAG, "Sender Class Checking the entry class values.");
+
+			if (key == null || value == null)
+			{
+				Log.i(Common.TAG, "Sender Class Key value found to be null.");
+
+				logger.warning("Ignoring payload entry thas has null: " + entry);
+			}
+			else
+			{
+				Log.i(Common.TAG, "Sender Class Key value not null passing as argument in PARAM_PAYLOAD_PREFIX.");
+
+				key = PARAM_PAYLOAD_PREFIX + key;
+				addParameter(body, key, URLEncoder.encode(value, UTF8));
+			}
+		}
+
+		String requestBody = body.toString();
+
+		Log.i(Common.TAG, "Sender HTTP requestBody : " + requestBody.toString());
+
+		logger.finest("Request body: " + requestBody);
+
+		HttpURLConnection conn;
+		int status;
+
+		try
+		{
+			Log.i(Common.TAG, "Sender Class Making the Http Post request.");
+
+			conn = post(GCM_SEND_ENDPOINT, requestBody);
+			
+			Log.i(Common.TAG, "Sender Class Post request completed.");
+			
+			Log.i(Common.TAG, "conn.getInputStream() : " + conn.getInputStream().toString());
+			
+			status = conn.getResponseCode();
+
+			Log.i(Common.TAG, "Sender Class Status code : " + status);
+		}
+		catch (IOException e)
+		{
+			Log.i(Common.TAG, "Sender Class IOException occurred while making a Http Post request.");
+
+			logger.log(Level.FINE, "IOException posting to GCM", e);
+			return null;
+		}
+
+		if (status / 100 == 5)
+		{
+			Log.i(Common.TAG, "Sender Class GCM Service not available.");
+
+			logger.fine("GCM service is unavailable (status " + status + ")");
+			return null;
+		}
+
+		String responseBody;
+
+		if (status != 200)
+		{
+			Log.i(Common.TAG, "Sender Class status code not equal to 200");
+
+			try
+			{
+				responseBody = getAndClose(conn.getErrorStream());
+
+				Log.i(Common.TAG, "Sender Class Plain post error response: " + responseBody);
+
+				logger.finest("Plain post error response: " + responseBody);
+			}
+			catch (IOException e)
+			{
+				Log.i(Common.TAG, "Sender Class IOException reading response: " + e);
+
+				// ignore the exception since it will thrown an
+				// InvalidRequestException
+				// anyways
+				responseBody = "N/A";
+				logger.log(Level.FINE, "Exception reading response: ", e);
+			}
+			throw new InvalidRequestException(status, responseBody);
+		}
+		else
+		{
+			Log.i(Common.TAG, "Sender Class Successfull message status return code.");
+
+			try
+			{
+				responseBody = getAndClose(conn.getInputStream());
+				
+				Log.i(Common.TAG, "Sender Class responseBody : " + responseBody);
+			}
+			catch (IOException e)
+			{
+				Log.i(Common.TAG, "Sender Class IO Exception at getAndClose(conn.getInputStream())");
+
+				logger.log(Level.WARNING, "Exception reading response: ", e);
+				// return null so it can retry
+				return null;
+			}
+		}
+
+		String[] lines = responseBody.split("\n");
+
+		Log.i(Common.TAG, "lines.length : " + lines.length);
+		
+		if (lines.length == 0 || lines[0].equals(""))
+		{
+			Log.i(Common.TAG, "Sender Class Recieved an empty response from GCM Service.");
+
+			throw new IOException("Received empty response from GCM service.");
+		}
+
+		String firstLine = lines[0];
+		String[] responseParts = split(firstLine);
+		String token = responseParts[0];
+		String value = responseParts[1];
+
+		if (token.equals(TOKEN_MESSAGE_ID))
+		{
+			Log.i(Common.TAG, "Sender Class TOKEN_MESSAGE_ID match found.");
+			Log.i(Common.TAG, "Sender Class Checking for messageId = " + value + " in Result Class.");
+			
+			Builder builder = new Result.Builder().messageId(value);
+			// check for canonical registration id
+			
+			if (lines.length > 1)
+			{
+				Log.i(Common.TAG, "Sender Class lines length greater than 1.");
+
+				String secondLine = lines[1];
+				responseParts = split(secondLine);
+				token = responseParts[0];
+				value = responseParts[1];
+
+				if (token.equals(TOKEN_CANONICAL_REG_ID))
+				{
+					Log.i(Common.TAG, "Sender Class token matches with TOKEN_CANONICAL_REG_ID");
+
+					builder.canonicalRegistrationId(value);
+				}
+				else
+				{
+					Log.i(Common.TAG, "Sender Class Invalid response from GCM " + responseBody);
+
+					logger.warning("Invalid response from GCM: " + responseBody);
+				}
+			}
+
+			Result result = builder.build();
+
+			if (logger.isLoggable(Level.FINE))
+			{
+				logger.fine("Message created succesfully (" + result + ")");
+			}
+			
+			Log.i(Common.TAG, "Sender Class result = " + result);
+			
+			Log.i(Common.TAG, "Sender Class Message created successfully.");
+
+			return result;
+		}
+		else if (token.equals(TOKEN_ERROR))
+		{
+			Log.i(Common.TAG, "Sender Class token matches with TOKEN_ERROR");
+
+			return new Result.Builder().errorCode(value).build();
+		}
+		else
+		{
+			Log.i(Common.TAG, "Sender Class Invalid response from GCM: " + responseBody);
+
+			throw new IOException("Invalid response from GCM: " + responseBody);
+		}
+	}
+}

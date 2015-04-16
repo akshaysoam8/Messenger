@@ -1,0 +1,57 @@
+package com.akshay.messenger;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import android.accounts.Account;
+import android.accounts.AccountManager;
+import android.app.Application;
+import android.content.SharedPreferences;
+import android.preference.PreferenceManager;
+import android.util.Patterns;
+
+public class Common extends Application
+{
+	public static String[] email_arr;
+	private static SharedPreferences prefs;
+	public static final String TAG = "Messenger";
+	public static String PROFILE_ID = "profile_id";
+	public static String REG_ID = "reg_id";
+	public static String FROM = "email";
+
+	public static boolean isNotify()
+	{
+		return prefs.getBoolean("notifications_new_message", true);
+	}
+
+	public static String getRingtone()
+	{
+		return prefs.getString("notifications_new_message_ringtone", android.provider.Settings.System.DEFAULT_NOTIFICATION_URI.toString());
+	}
+
+	@Override
+	public void onCreate()
+	{
+		super.onCreate();
+		prefs = PreferenceManager.getDefaultSharedPreferences(this);
+
+		List<String> emailList = getEmailList();
+		email_arr = emailList.toArray(new String[emailList.size()]);
+	}
+
+	private List<String> getEmailList()
+	{
+		List<String> lst = new ArrayList<String>();
+		Account[] accounts = AccountManager.get(this).getAccounts();
+
+		for (Account account : accounts)
+		{
+			if (Patterns.EMAIL_ADDRESS.matcher(account.name).matches())
+			{
+				lst.add(account.name);
+			}
+		}
+
+		return lst;
+	}
+}

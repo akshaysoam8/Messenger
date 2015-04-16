@@ -1,0 +1,322 @@
+package com.akshay.messenger;
+
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager.NameNotFoundException;
+import android.os.AsyncTask;
+import android.os.Bundle;
+import android.util.Log;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.TextView;
+
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GooglePlayServicesUtil;
+import com.google.android.gms.gcm.GoogleCloudMessaging;
+
+public class MainActivity extends Activity
+{
+	public static final String EXTRA_MESSAGE = "message";
+	public static final String PROPERTY_REG_ID = "registration_id";
+	private static final String PROPERTY_APP_VERSION = "appVersion";
+	private final static int PLAY_SERVICES_RESOLUTION_REQUEST = 9000;
+
+	TextView mDisplay;
+	GoogleCloudMessaging gcm;
+	AtomicInteger msgId = new AtomicInteger();
+	SharedPreferences prefs;
+	Context context;
+
+	EditText message_text;
+	EditText send_to;
+	EditText name;
+
+	String regid;
+
+	@Override
+	protected void onCreate(Bundle savedInstanceState)
+	{
+		super.onCreate(savedInstanceState);
+
+		Log.i(Common.TAG, "MainActivity started");
+
+		mDisplay = (TextView) findViewById(R.id.display);
+
+		message_text = (EditText) findViewById(R.id.message_text);
+		send_to = (EditText) findViewById(R.id.receiver_email);
+
+		Button btn_register = (Button) findViewById(R.id.register);
+		btn_register.setOnClickListener(new OnClickListener()
+		{
+
+			@Override
+			public void onClick(View v)
+			{
+				Log.i(Common.TAG, "MainActivity Register Button Clicked");
+
+				sendRegistrationIdToBackend(Constants.REG_ID);
+			}
+		});
+
+		Button btn_send_message = (Button) findViewById(R.id.send);
+		btn_send_message.setOnClickListener(new OnClickListener()
+		{
+			@Override
+			public void onClick(View v)
+			{
+				Log.i(Common.TAG, "MainActivity Send Message Clicked");
+
+				new AsyncTask<Void, Void, String>()
+				{
+					@Override
+					protected String doInBackground(Void... params)
+					{
+						String msg = "";
+						try
+						{
+							Log.i(Common.TAG, "MainActivity message_text : " + message_text.getText().toString());
+							Log.i(Common.TAG, "MainActivity Constants.SENDER_ID : " + Constants.SENDER_ID);
+
+							Bundle data = new Bundle();
+							data.putString("my_message", message_text.getText().toString());
+							data.putString("my_action", "com.google.android.gcm.demo.app.ECHO_NOW");
+							String id = Integer.toString(msgId.incrementAndGet());
+
+							Log.i(Common.TAG, "MainActivity id : " + id);
+
+							gcm.send(Constants.SENDER_ID + "@gcm.googleapis.com", id, data);
+							msg = "Sent message";
+
+							Sender sender = new Sender(Constants.API_KEY);
+
+							MongoDatabase.getRegistrationIdFromEmailId(send_to.getText().toString());
+
+							String time = getCurrentTimeStamp();
+
+							sender.sendMessage2(message_text.getText().toString(), send_to.getText().toString(), time);
+
+							MongoDatabase.sendNewMessage(message_text.getText().toString(), send_to.getText().toString(), time);
+
+						}
+						catch (IOException ex)
+						{
+							msg = "Error :" + ex.getMessage();
+						}
+						return msg;
+					}
+
+					@Override
+					protected void onPostExecute(String msg)
+					{
+						Log.i(Common.TAG, "MainActivity AsyncTask Completed.");
+
+						mDisplay.append(msg + "\n");
+					}
+				}.execute(null, null, null);
+			}
+		});
+
+		context = getApplicationContext();
+
+		if (checkPlayServices())
+		{
+			Log.i(Common.TAG, "MainActivity google play services check succeeded");
+
+			gcm = GoogleCloudMessaging.getInstance(this);
+
+			if (getRegistrationId(context).isEmpty())
+			{				
+				setContentView(R.layout.register);
+
+				registerInBackground();
+			}
+			else
+			{
+				
+			}
+		}
+	}
+
+	@Override
+	protected void onResume()
+	{
+		super.onResume();
+
+		Log.i(Common.TAG, "MainActivity Resumed");
+
+		checkPlayServices();
+
+		final SharedPreferences prefs = getGCMPreferences(getApplicationContext());
+		Constants.REG_ID = prefs.getString(PROPERTY_REG_ID, "");
+	}
+
+	private boolean checkPlayServices()
+	{
+		Log.i(Common.TAG, "MainActivity Checking for google play services");
+
+		int resultCode = GooglePlayServicesUtil.isGooglePlayServicesAvailable(this);
+
+		if (resultCode != ConnectionResult.SUCCESS)
+		{
+			Log.i(Common.TAG, "MainActivity result status not SUCCESS");
+
+			if (GooglePlayServicesUtil.isUserRecoverableError(resultCode))
+			{
+				GooglePlayServicesUtil.getErrorDialog(resultCode, this, PLAY_SERVICES_RESOLUTION_REQUEST).show();
+			}
+			else
+			{
+				Log.i(Common.TAG, "MainActivity This device is not supported.");
+				finish();
+			}
+			return false;
+		}
+		return true;
+	}
+
+	private String getRegistrationId(Context context)
+	{
+		Log.i(Common.TAG, "MainActivity getting the registration ID");
+
+		final SharedPreferences prefs = getGCMPreferences(context);
+		String registrationId = prefs.getString(PROPERTY_REG_ID, "");
+
+		if (registrationId.isEmpty())
+		{
+			Log.i(Common.TAG, "MainActivity Registration not found.");
+			return "";
+		}
+
+		int registeredVersion = prefs.getInt(PROPERTY_APP_VERSION, Integer.MIN_VALUE);
+		int currentVersion = getAppVersion(context);
+
+		if (registeredVersion != currentVersion)
+		{
+			Log.i(Common.TAG, "MainActivity App version changed.");
+			return "";
+		}
+
+		Log.i(Common.TAG, "MainActivity App versio is same");
+		Log.i(Common.TAG, "MainActivity Registration Id found : " + registrationId);
+
+		Constants.REG_ID = registrationId;
+
+		return registrationId;
+	}
+
+	private SharedPreferences getGCMPreferences(Context context)
+	{
+		Log.i(Common.TAG, "MainActivity Geting the shared preferences");
+
+		return getSharedPreferences(MainActivity.class.getSimpleName(), Context.MODE_PRIVATE);
+	}
+
+	private static int getAppVersion(Context context)
+	{
+		Log.i(Common.TAG, "MainActivity geting the app version");
+
+		try
+		{
+			PackageInfo packageInfo = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+			return packageInfo.versionCode;
+		}
+		catch (NameNotFoundException e)
+		{
+			throw new RuntimeException("Could not get package name: " + e);
+		}
+	}
+
+	private void registerInBackground()
+	{
+		Log.i(Common.TAG, "MainActivity registering in the background.");
+
+		new AsyncTask<Void, Void, String>()
+		{
+			@Override
+			protected String doInBackground(Void... params)
+			{
+				Log.i(Common.TAG, "MainActivity doing in the background.");
+
+				String msg = "";
+
+				try
+				{
+					if (gcm == null)
+					{
+						gcm = GoogleCloudMessaging.getInstance(context);
+					}
+
+					regid = gcm.register(Constants.SENDER_ID);
+					msg = "Device registered, registration ID=" + regid;
+
+					Constants.REG_ID = regid;
+
+					storeRegistrationId(context, regid);
+				}
+				catch (IOException ex)
+				{
+					msg = "Error :" + ex.getMessage();
+				}
+				return msg;
+			}
+
+			@Override
+			protected void onPostExecute(String msg)
+			{
+				Log.i(Common.TAG, "MainActivity on Post Execute");
+
+				mDisplay.append(msg + "\n");
+			}
+		}.execute(null, null, null);
+
+	}
+
+	private void sendRegistrationIdToBackend(String regid)
+	{
+		Log.i(Common.TAG, "MainActivity Sending the registration id to the database");
+
+		name = (EditText) findViewById(R.id.your_name);
+		EditText email = (EditText) findViewById(R.id.sender_email);
+		
+		Common.SENDER_NAME = name.getText().toString();
+
+		Log.i(Common.TAG, "MainActivity Adding new profile in the database");
+
+		MongoDatabase.AddNewProfile(name.getText().toString(), email.getText().toString(), regid);
+
+		Log.i(Common.TAG, "MainActivity New profile added.");
+	}
+
+	public static String getCurrentTimeStamp()
+	{
+		SimpleDateFormat sdfDate = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+		Date now = new Date();
+		String strDate = sdfDate.format(now);
+		return strDate;
+	}
+
+	private void storeRegistrationId(Context context, String regId)
+	{
+		Log.i(Common.TAG, "MainActivity storing the registration id");
+
+		final SharedPreferences prefs = getGCMPreferences(context);
+		int appVersion = getAppVersion(context);
+
+		Log.i(Common.TAG, "Saving regId on app version " + appVersion);
+
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(PROPERTY_REG_ID, regId);
+		editor.putInt(PROPERTY_APP_VERSION, appVersion);
+		editor.putString("SENDER_NAME", name.getText().toString());
+		editor.commit();
+	}
+}
